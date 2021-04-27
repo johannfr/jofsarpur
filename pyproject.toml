@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "jofsarpur"
-version = "0.1.0"
+version = "0.1.1"
 description = ""
 authors = ["Jóhann Friðriksson <johann.fridriksson@gmail.com>"]
 
@@ -13,3 +13,6 @@ toml = "^0.10.2"
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+jofsarpur = "jofsarpur.main:main"
