@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from subprocess import DEVNULL, Popen
 
+import click
 import requests
 import toml
 from rich import inspect
@@ -106,22 +107,44 @@ class DownloadWorker:
                         self.download_configuration["pid"]
                     )
                     self.progress.log(
-                        f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: Done."
+                        f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [green]Done.[/green]"
                     )
                     self.progress.update(self.progress_bar, advance=1)
                 else:
                     self.progress.stop_task(self.progress_bar)
                     self.progress.remove_task(self.progress_bar)
                     self.progress.log(
-                        f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: Failed: ffmpeg returned {self.process.returncode}"
+                        f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [red]Failed:[/red] ffmpeg returned {self.process.returncode}"
                     )
                 break
             time.sleep(0.2)
 
 
-def main():
+@click.command()
+@click.option(
+    "-c",
+    "--config",
+    "config_filename",
+    default=CONFIGURATION_TOML,
+    show_default=True,
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
+)
+@click.option(
+    "-l",
+    "--log",
+    "download_log_filename",
+    default=Path(Path.home(), DOWNLOADS_JSON),
+    show_default=True,
+    type=click.Path(
+        exists=False, file_okay=True, dir_okay=False, writable=True, readable=True
+    ),
+)
+def main(config_filename, download_log_filename):
+    """
+    A configurable downloader for video-content from RÚV.
+    """
+
     configuration = toml.load(CONFIGURATION_TOML)
-    download_log_filename = Path(Path.home(), DOWNLOADS_JSON)
 
     global_config = configuration["global"]
     series_count = len([k for k in configuration.keys() if k != "global"])
@@ -158,7 +181,9 @@ def main():
                 ).groups()
                 pid = episode["id"]
                 if sid in download_log.keys() and pid in download_log[sid]:
-                    progress.log(f"Already downloaded {title} {sid}:{pid}. Skipping.")
+                    progress.log(
+                        f"Already downloaded {title} {sid}:{pid}: [purple]Skipping.[/purple]"
+                    )
                     progress.start_task(task_metadata)
                     progress.update(task_episodes_metadata, advance=1)
                     continue

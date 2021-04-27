@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "jofsarpur"
-version = "0.1.1"
+version = "0.1.2"
 description = ""
 authors = ["Jóhann Friðriksson <johann.fridriksson@gmail.com>"]
 
@@ -9,6 +9,7 @@ python = "^3.8"
 rich = "^10.1.0"
 requests = "^2.25.1"
 toml = "^0.10.2"
+click = "^7.1.2"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
