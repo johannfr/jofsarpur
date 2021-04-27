@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "jofsarpur"
+version = "0.1.0"
+description = ""
+authors = ["Jóhann Friðriksson <johann.fridriksson@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+rich = "^10.1.0"
+requests = "^2.25.1"
+toml = "^0.10.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
