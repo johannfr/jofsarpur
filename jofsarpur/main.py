@@ -144,7 +144,7 @@ def main(config_filename, download_log_filename):
     A configurable downloader for video-content from RÚV.
     """
 
-    configuration = toml.load(CONFIGURATION_TOML)
+    configuration = toml.load(config_filename)
 
     global_config = configuration["global"]
     series_count = len([k for k in configuration.keys() if k != "global"])
@@ -176,9 +176,19 @@ def main(config_filename, download_log_filename):
                 f"Fetching metadata for {title}", total=len(series["episodes"])
             )
             for episode in series["episodes"]:
-                episode_number, episode_count = re.match(
-                    r"\S+\s([0-9]+) af ([0-9]+)", episode["title"]
-                ).groups()
+                episode_item = {}
+                try:
+                    episode_number, episode_count = re.match(
+                        r"\S+\s([0-9]+) af ([0-9]+)", episode["title"]
+                    ).groups()
+                    episode_item.update(
+                        {
+                            "episode_number": int(episode_number),
+                            "episode_count": int(episode_count),
+                        }
+                    )
+                except AttributeError:
+                    pass
                 pid = episode["id"]
                 if sid in download_log.keys() and pid in download_log[sid]:
                     progress.log(
@@ -189,20 +199,21 @@ def main(config_filename, download_log_filename):
                     continue
                 file_string = get_file_data(sid, pid)["file"]
                 url = parse_file_string(file_string)
-                download_queue.append(
+                episode_item.update(
                     {
                         "url": url,
                         "title": sid_config["title"]
                         if "title" in sid_config.keys()
                         else title,
-                        "episode_number": int(episode_number),
-                        "episode_count": int(episode_count),
+                        "episode_title": episode["title"],
                         "sid": sid,
                         "pid": pid,
                         "filenames": sid_config["filenames"],
                         "download_directory": global_config["download_directory"],
                     }
                 )
+
+                download_queue.append(episode_item)
                 progress.start_task(task_metadata)
                 progress.update(task_episodes_metadata, advance=1)
             progress.update(task_metadata, advance=1)
