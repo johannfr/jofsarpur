@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from subprocess import DEVNULL, Popen
 from enum import Enum
+from datetime import datetime
 
 import click
 import requests
@@ -222,6 +223,9 @@ def main(config_filename, download_log_filename, thread_count):
                         "episode_title": episode["title"],
                         "sid": sid,
                         "pid": pid,
+                        "airdate": datetime.strptime(
+                            episode["firstrun"], "%Y-%m-%d %H:%M:%S"
+                        ),
                         "filenames": sid_config["filenames"],
                         "download_directory": global_config["download_directory"],
                     }
