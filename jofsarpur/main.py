@@ -4,6 +4,7 @@ import threading
 import time
 from pathlib import Path
 from subprocess import DEVNULL, Popen
+from enum import Enum
 
 import click
 import requests
@@ -61,17 +62,27 @@ def parse_file_string(file_string):
     return prefix + max_bitrate_suffix
 
 
-class DownloadWorker:
-    def __init__(self, download_configuration, download_log, progress):
+class DownloadState(Enum):
+    WAITING = 0
+    DOWNLOADING = 1
+    DONE = 2
+
+
+class DownloadWorker(threading.Thread):
+    def __init__(
+        self, download_configuration, download_log, progress, total_download_progress
+    ):
+        threading.Thread.__init__(self)
         self.download_configuration = download_configuration
         self.download_log = download_log
         self.progress = progress
+        self.total_download_progress = total_download_progress
         output_filename = Path(
             download_configuration["download_directory"],
             download_configuration["filenames"].format(**download_configuration),
         )
         output_filename.parent.mkdir(parents=True, exist_ok=True)
-        process_args = [
+        self.process_args = [
             "ffmpeg",
             "-hide_banner",
             "-loglevel",
@@ -86,17 +97,21 @@ class DownloadWorker:
             "aac_adtstoasc",
             str(output_filename),
         ]
+        self.state = DownloadState.WAITING
 
-        self.progress_bar = progress.add_task(
-            "Downloading {title} {sid}:{pid}".format(**download_configuration),
+    def run(self):
+        self.state = DownloadState.DOWNLOADING
+        self.progress_bar = self.progress.add_task(
+            "Downloading {title} {sid}:{pid}".format(**self.download_configuration),
             total=1,
+            start=False,
         )
-        self.process = Popen(process_args, stdout=DEVNULL, stderr=DEVNULL)
-        threading.Thread(target=self.poll).start()
-
-    def poll(self):
+        self.process = Popen(self.process_args, stdout=DEVNULL, stderr=DEVNULL)
         while True:
             if self.process.poll() != None:
+                self.progress.stop_task(self.progress_bar)
+                self.progress.remove_task(self.progress_bar)
+                self.progress.update(self.total_download_progress, advance=1)
                 if self.process.returncode == 0:
                     if (
                         self.download_configuration["sid"]
@@ -109,13 +124,11 @@ class DownloadWorker:
                     self.progress.log(
                         f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [green]Done.[/green]"
                     )
-                    self.progress.update(self.progress_bar, advance=1)
                 else:
-                    self.progress.stop_task(self.progress_bar)
-                    self.progress.remove_task(self.progress_bar)
                     self.progress.log(
                         f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [red]Failed:[/red] ffmpeg returned {self.process.returncode}"
                     )
+                self.state = DownloadState.DONE
                 break
             time.sleep(0.2)
 
@@ -139,7 +152,8 @@ class DownloadWorker:
         exists=False, file_okay=True, dir_okay=False, writable=True, readable=True
     ),
 )
-def main(config_filename, download_log_filename):
+@click.option("-t", "--threads", "thread_count", default=4, show_default=True)
+def main(config_filename, download_log_filename, thread_count):
     """
     A configurable downloader for video-content from RÚV.
     """
@@ -219,10 +233,40 @@ def main(config_filename, download_log_filename):
             progress.update(task_metadata, advance=1)
 
         # Preprocessing done. Let's start downloading.
+        total_download_progress = progress.add_task(
+            "Downloading episodes", total=len(download_queue)
+        )
         download_workers = [
-            DownloadWorker(item, download_log, progress) for item in download_queue
+            DownloadWorker(item, download_log, progress, total_download_progress)
+            for item in download_queue
         ]
-        while not progress.finished:
+        while True:
+            done_threads = list(
+                filter(
+                    lambda worker: worker.state == DownloadState.DONE, download_workers
+                )
+            )
+            if len(done_threads) == len(download_workers):
+                break
+
+            running_threads = list(
+                filter(
+                    lambda worker: worker.state == DownloadState.DOWNLOADING,
+                    download_workers,
+                )
+            )
+            waiting_threads = list(
+                filter(
+                    lambda worker: worker.state == DownloadState.WAITING,
+                    download_workers,
+                )
+            )
+            if len(done_threads) < len(download_workers):
+                for i in range(
+                    0, min(len(waiting_threads), thread_count - len(running_threads))
+                ):
+                    waiting_threads[i].start()
+
             time.sleep(0.5)
     json.dump(download_log, open(download_log_filename, "w"))
 
