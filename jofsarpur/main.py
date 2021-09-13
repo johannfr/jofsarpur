@@ -84,9 +84,9 @@ class DownloadWorker(threading.Thread):
                 download_configuration["download_directory"],
                 download_configuration["filenames"].format(**download_configuration),
             )
-        except KeyError:
+        except KeyError as e:
             self.progress.log(
-                f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [red]Failed:[/red] ffmpeg returned {self.process.returncode}"
+                f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [red]Failed:[/red] Keyerror when expanding filename: {e}"
             )
             self.state = DownloadState.ERROR
             return
