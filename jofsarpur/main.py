@@ -67,6 +67,7 @@ class DownloadState(Enum):
     WAITING = 0
     DOWNLOADING = 1
     DONE = 2
+    ERROR = 3
 
 
 class DownloadWorker(threading.Thread):
@@ -78,10 +79,18 @@ class DownloadWorker(threading.Thread):
         self.download_log = download_log
         self.progress = progress
         self.total_download_progress = total_download_progress
-        output_filename = Path(
-            download_configuration["download_directory"],
-            download_configuration["filenames"].format(**download_configuration),
-        )
+        try:
+            output_filename = Path(
+                download_configuration["download_directory"],
+                download_configuration["filenames"].format(**download_configuration),
+            )
+        except KeyError:
+            self.progress.log(
+                f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [red]Failed:[/red] ffmpeg returned {self.process.returncode}"
+            )
+            self.state = DownloadState.ERROR
+            return
+
         output_filename.parent.mkdir(parents=True, exist_ok=True)
         self.process_args = [
             "ffmpeg",
@@ -101,6 +110,8 @@ class DownloadWorker(threading.Thread):
         self.state = DownloadState.WAITING
 
     def run(self):
+        if self.state != DownloadState.WAITING:
+            return
         self.state = DownloadState.DOWNLOADING
         self.progress_bar = self.progress.add_task(
             "Downloading {title} {sid}:{pid}".format(**self.download_configuration),
