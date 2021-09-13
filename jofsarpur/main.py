@@ -88,6 +88,7 @@ class DownloadWorker(threading.Thread):
             self.progress.log(
                 f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [red]Failed:[/red] Keyerror when expanding filename: {e}"
             )
+            self.progress.log(download_configuration)
             self.state = DownloadState.ERROR
             return
 
