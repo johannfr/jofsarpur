@@ -215,7 +215,17 @@ def main(config_filename, download_log_filename, thread_count):
                         }
                     )
                 except AttributeError:
-                    pass
+                    try:
+                        episode_number = re.match(
+                            r"([0-9]+). kafli", episode["title"]
+                        ).groups()[0]
+                        episode_item.update(
+                            {
+                                "episode_number": int(episode_number),
+                            }
+                        )
+                    except AttributeError:
+                        pass
                 pid = episode["id"]
                 if sid in download_log.keys() and pid in download_log[sid]:
                     progress.log(
