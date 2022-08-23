@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "jofsarpur"
-version = "0.1.9"
+version = "0.1.10"
 description = ""
 authors = ["Jóhann Friðriksson <johann.fridriksson@gmail.com>"]
 

@@ -56,11 +56,13 @@ def get_file_data(sid, pid):
 
 
 def parse_file_string(file_string):
-    prefix, rest = file_string.split("streams=")
-    prefix = prefix + "streams="
-    bitrates = rest.split(",")
-    max_bitrate_suffix = bitrates[-1].split(":")[0]
-    return prefix + max_bitrate_suffix
+    return file_string
+    # Gamalt: Breytti 23. agust, 2022 .. nuna virkar strengurinn beint.
+    # prefix, rest = file_string.split("streams=")
+    # prefix = prefix + "streams="
+    # bitrates = rest.split(",")
+    # max_bitrate_suffix = bitrates[-1].split(":")[0]
+    # return prefix + max_bitrate_suffix
 
 
 class DownloadState(Enum):
