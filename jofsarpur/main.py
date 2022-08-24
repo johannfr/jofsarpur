@@ -88,7 +88,7 @@ class DownloadWorker(threading.Thread):
             )
         except KeyError as e:
             self.progress.log(
-                f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [red]Failed:[/red] Keyerror when expanding filename: {e}"
+                f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [red]Failed:[/red] KeyError when expanding filename: {e}"
             )
             self.progress.log(download_configuration)
             self.state = DownloadState.ERROR
@@ -143,6 +143,8 @@ class DownloadWorker(threading.Thread):
                     self.progress.log(
                         f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [red]Failed:[/red] ffmpeg returned {self.process.returncode}"
                     )
+                    self.state = DownloadState.ERROR
+                    break
                 self.state = DownloadState.DONE
                 break
             time.sleep(0.2)
@@ -274,8 +276,6 @@ def main(config_filename, download_log_filename, thread_count):
                     lambda worker: worker.state == DownloadState.DONE, download_workers
                 )
             )
-            if len(done_threads) == len(download_workers):
-                break
 
             running_threads = list(
                 filter(
@@ -289,6 +289,22 @@ def main(config_filename, download_log_filename, thread_count):
                     download_workers,
                 )
             )
+
+            error_threads = list(
+                filter(
+                    lambda worker: worker.state == DownloadState.ERROR, download_workers
+                )
+            )
+
+            if len(done_threads) == len(download_workers):
+                break
+
+            if (
+                len(waiting_threads) + len(running_threads) == 0
+                and len(error_threads) > 0
+            ):
+                break
+
             if len(done_threads) < len(download_workers):
                 for i in range(
                     0, min(len(waiting_threads), thread_count - len(running_threads))
