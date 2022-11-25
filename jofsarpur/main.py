@@ -74,7 +74,12 @@ class DownloadState(Enum):
 
 class DownloadWorker(threading.Thread):
     def __init__(
-        self, download_configuration, download_log, progress, total_download_progress
+        self,
+        download_configuration,
+        download_log,
+        progress,
+        total_download_progress,
+        dry_run,
     ):
         threading.Thread.__init__(self)
         self.download_configuration = download_configuration
@@ -82,9 +87,15 @@ class DownloadWorker(threading.Thread):
         self.progress = progress
         self.total_download_progress = total_download_progress
         try:
+            filename_field = download_configuration["exceptions"][
+                download_configuration["pid"]
+            ]
+        except KeyError:
+            filename_field = "filenames"
+        try:
             output_filename = Path(
                 download_configuration["download_directory"],
-                download_configuration["filenames"].format(**download_configuration),
+                download_configuration[filename_field].format(**download_configuration),
             )
         except KeyError as e:
             self.progress.log(
@@ -94,7 +105,8 @@ class DownloadWorker(threading.Thread):
             self.state = DownloadState.ERROR
             return
 
-        output_filename.parent.mkdir(parents=True, exist_ok=True)
+        if not dry_run:
+            output_filename.parent.mkdir(parents=True, exist_ok=True)
         self.process_args = [
             "ffmpeg",
             "-hide_banner",
@@ -110,7 +122,10 @@ class DownloadWorker(threading.Thread):
             "aac_adtstoasc",
             str(output_filename),
         ]
-        self.state = DownloadState.WAITING
+        if dry_run:
+            self.state = DownloadState.DONE
+        else:
+            self.state = DownloadState.WAITING
 
     def run(self):
         if self.state != DownloadState.WAITING:
@@ -170,7 +185,8 @@ class DownloadWorker(threading.Thread):
     ),
 )
 @click.option("-t", "--threads", "thread_count", default=4, show_default=True)
-def main(config_filename, download_log_filename, thread_count):
+@click.option("-d", "--dry-run", is_flag=True, default=False, show_default=True)
+def main(config_filename, download_log_filename, thread_count, dry_run):
     """
     A configurable downloader for video-content from RÚV.
     """
@@ -256,6 +272,14 @@ def main(config_filename, download_log_filename, thread_count):
                         "download_directory": global_config["download_directory"],
                     }
                 )
+                for ex_pid, ex_filename in [
+                    (e.replace("exception-", ""), sid_config[e])
+                    for e in sid_config.keys()
+                    if e.startswith("exception-")
+                ]:
+                    if "exceptions" not in episode_item.keys():
+                        episode_item["exceptions"] = {}
+                    episode_item["exceptions"][ex_pid] = ex_filename
 
                 download_queue.append(episode_item)
                 progress.start_task(task_metadata)
@@ -267,7 +291,9 @@ def main(config_filename, download_log_filename, thread_count):
             "Downloading episodes", total=len(download_queue)
         )
         download_workers = [
-            DownloadWorker(item, download_log, progress, total_download_progress)
+            DownloadWorker(
+                item, download_log, progress, total_download_progress, dry_run
+            )
             for item in download_queue
         ]
         while True:
@@ -312,7 +338,8 @@ def main(config_filename, download_log_filename, thread_count):
                     waiting_threads[i].start()
 
             time.sleep(0.5)
-    json.dump(download_log, open(download_log_filename, "w"))
+    if not dry_run:
+        json.dump(download_log, open(download_log_filename, "w"))
 
 
 if __name__ == "__main__":
