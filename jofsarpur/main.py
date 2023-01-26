@@ -2,15 +2,14 @@ import json
 import re
 import threading
 import time
+from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from subprocess import DEVNULL, Popen
-from enum import Enum
-from datetime import datetime
 
 import click
 import requests
 import toml
-from rich import inspect
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
@@ -197,7 +196,7 @@ def main(config_filename, download_log_filename, thread_count, dry_run):
     series_count = len([k for k in configuration.keys() if k != "global"])
 
     try:
-        download_log = json.load(open(download_log_filename, "r"))
+        download_log = json.load(open(download_log_filename))
     except FileNotFoundError:
         download_log = {}
 
