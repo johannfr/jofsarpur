@@ -186,6 +186,8 @@ def main(config_filename, download_log_filename, thread_count, dry_run, debug):
 
     if debug:
         LOG.setLevel(logging.DEBUG)
+    else:
+        LOG.setLevel(logging.INFO)
     configuration = toml.load(config_filename)
 
     global_config = configuration["global"]
