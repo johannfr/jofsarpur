@@ -35,6 +35,7 @@ def query_graphql(graphdata):
         ).json()
         if "data" in json_data.keys():
             return json_data
+        LOG.error(f"Request for {graphdata} unsuccessful. Retrying.")
         time.sleep(1)
 
 
