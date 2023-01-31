@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import threading
 import time
@@ -10,11 +11,16 @@ from subprocess import DEVNULL, Popen
 import click
 import requests
 import toml
-from rich.console import Console
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+from rich.logging import RichHandler
 
 CONFIGURATION_TOML = "/etc/jofsarpur.toml"
 DOWNLOADS_JSON = ".jofsarpur-downloads.json"
+
+FORMAT = "%(message)s"
+logging.basicConfig(
+    level="ERROR", format=FORMAT, datefmt="[%X]", handlers=[RichHandler(markup=True)]
+)
+LOG = logging.getLogger("jofsarpur")
 
 
 def query_graphql(graphdata):
@@ -76,31 +82,22 @@ class DownloadWorker(threading.Thread):
         self,
         download_configuration,
         download_log,
-        progress,
-        total_download_progress,
         dry_run,
     ):
         threading.Thread.__init__(self)
         self.download_configuration = download_configuration
         self.download_log = download_log
-        self.progress = progress
-        self.total_download_progress = total_download_progress
-        try:
-            filename_field = download_configuration["exceptions"][
-                download_configuration["pid"]
-            ]
-        except KeyError:
-            filename_field = "filenames"
+        filename_field = "filenames"
         try:
             output_filename = Path(
                 download_configuration["download_directory"],
                 download_configuration[filename_field].format(**download_configuration),
             )
         except KeyError as e:
-            self.progress.log(
+            LOG.error(
                 f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [red]Failed:[/red] KeyError when expanding filename: {e}"
             )
-            self.progress.log(download_configuration)
+            LOG.error(download_configuration)
             self.state = DownloadState.ERROR
             return
 
@@ -121,6 +118,7 @@ class DownloadWorker(threading.Thread):
             "aac_adtstoasc",
             str(output_filename),
         ]
+        LOG.debug(f"{' '.join(self.process_args)}")
         if dry_run:
             self.state = DownloadState.DONE
         else:
@@ -130,17 +128,12 @@ class DownloadWorker(threading.Thread):
         if self.state != DownloadState.WAITING:
             return
         self.state = DownloadState.DOWNLOADING
-        self.progress_bar = self.progress.add_task(
+        LOG.info(
             "Downloading {title} {sid}:{pid}".format(**self.download_configuration),
-            total=1,
-            start=False,
         )
         self.process = Popen(self.process_args, stdout=DEVNULL, stderr=DEVNULL)
         while True:
-            if self.process.poll() != None:
-                self.progress.stop_task(self.progress_bar)
-                self.progress.remove_task(self.progress_bar)
-                self.progress.update(self.total_download_progress, advance=1)
+            if self.process.poll() is not None:
                 if self.process.returncode == 0:
                     if (
                         self.download_configuration["sid"]
@@ -150,18 +143,18 @@ class DownloadWorker(threading.Thread):
                     self.download_log[self.download_configuration["sid"]].append(
                         self.download_configuration["pid"]
                     )
-                    self.progress.log(
+                    LOG.info(
                         f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [green]Done.[/green]"
                     )
                 else:
-                    self.progress.log(
+                    LOG.error(
                         f"Downloading {self.download_configuration['title']} {self.download_configuration['sid']}:{self.download_configuration['pid']}: [red]Failed:[/red] ffmpeg returned {self.process.returncode}"
                     )
                     self.state = DownloadState.ERROR
                     break
                 self.state = DownloadState.DONE
                 break
-            time.sleep(0.2)
+            time.sleep(1)
 
 
 @click.command()
@@ -185,158 +178,132 @@ class DownloadWorker(threading.Thread):
 )
 @click.option("-t", "--threads", "thread_count", default=4, show_default=True)
 @click.option("-d", "--dry-run", is_flag=True, default=False, show_default=True)
-def main(config_filename, download_log_filename, thread_count, dry_run):
+@click.option("--debug", is_flag=True, default=False, show_default=True)
+def main(config_filename, download_log_filename, thread_count, dry_run, debug):
     """
     A configurable downloader for video-content from RÚV.
     """
 
+    if debug:
+        LOG.setLevel(logging.DEBUG)
     configuration = toml.load(config_filename)
 
     global_config = configuration["global"]
-    series_count = len([k for k in configuration.keys() if k != "global"])
 
     try:
         download_log = json.load(open(download_log_filename))
     except FileNotFoundError:
         download_log = {}
 
-    console = Console()
     download_queue = []
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        console=console,
-        transient=True,
-    ) as progress:
-        task_metadata = progress.add_task(
-            f"[yellow]Fetching series meta-data", total=series_count, start=False
-        )
-        for sid, sid_config in [
-            (k, v) for k, v in configuration.items() if k != "global"
-        ]:
-            series = get_series_data(sid)
-            title = series["title"]
-            task_episodes_metadata = progress.add_task(
-                f"Fetching metadata for {title}", total=len(series["episodes"])
-            )
-            for episode in series["episodes"]:
-                episode_item = {}
+    for sid, sid_config in [(k, v) for k, v in configuration.items() if k != "global"]:
+        series = get_series_data(sid)
+        title = series["title"]
+        LOG.info(f"Fetching metadata for {title}:{sid}")
+        for episode in series["episodes"]:
+            episode_item = {}
+            try:
+                episode_number, episode_count = re.match(
+                    r"\S+\s([0-9]+) af ([0-9]+)", episode["title"]
+                ).groups()
+                episode_item.update(
+                    {
+                        "episode_number": int(episode_number),
+                        "episode_count": int(episode_count),
+                    }
+                )
+            except AttributeError:
                 try:
-                    episode_number, episode_count = re.match(
-                        r"\S+\s([0-9]+) af ([0-9]+)", episode["title"]
-                    ).groups()
+                    episode_number = re.match(
+                        r"([0-9]+). kafli", episode["title"]
+                    ).groups()[0]
                     episode_item.update(
                         {
                             "episode_number": int(episode_number),
-                            "episode_count": int(episode_count),
                         }
                     )
                 except AttributeError:
-                    try:
-                        episode_number = re.match(
-                            r"([0-9]+). kafli", episode["title"]
-                        ).groups()[0]
-                        episode_item.update(
-                            {
-                                "episode_number": int(episode_number),
-                            }
-                        )
-                    except AttributeError:
-                        pass
-                pid = episode["id"]
-                if sid in download_log.keys() and pid in download_log[sid]:
-                    progress.log(
-                        f"Already downloaded {title} {sid}:{pid}: [purple]Skipping.[/purple]"
-                    )
-                    progress.start_task(task_metadata)
-                    progress.update(task_episodes_metadata, advance=1)
-                    continue
-                file_string = get_file_data(sid, pid)["file"]
-                url = parse_file_string(file_string)
-                episode_item.update(
-                    {
-                        "url": url,
-                        "title": sid_config["title"]
-                        if "title" in sid_config.keys()
-                        else title,
-                        "episode_title": episode["title"],
-                        "sid": sid,
-                        "pid": pid,
-                        "airdate": datetime.strptime(
-                            episode["firstrun"], "%Y-%m-%d %H:%M:%S"
-                        ),
-                        "filenames": sid_config["filenames"],
-                        "download_directory": global_config["download_directory"],
-                    }
+                    pass
+            pid = episode["id"]
+            if sid in download_log.keys() and pid in download_log[sid]:
+                LOG.info(
+                    f"Already downloaded {title} {sid}:{pid}: [purple]Skipping.[/purple]"
                 )
-                for ex_pid, ex_filename in [
-                    (e.replace("exception-", ""), sid_config[e])
-                    for e in sid_config.keys()
-                    if e.startswith("exception-")
-                ]:
-                    if "exceptions" not in episode_item.keys():
-                        episode_item["exceptions"] = {}
-                    episode_item["exceptions"][ex_pid] = ex_filename
+                continue
+            file_string = get_file_data(sid, pid)["file"]
+            url = parse_file_string(file_string)
+            episode_item.update(
+                {
+                    "url": url,
+                    "title": sid_config["title"]
+                    if "title" in sid_config.keys()
+                    else title,
+                    "episode_title": episode["title"],
+                    "sid": sid,
+                    "pid": pid,
+                    "airdate": datetime.strptime(
+                        episode["firstrun"], "%Y-%m-%d %H:%M:%S"
+                    ),
+                    "filenames": sid_config["filenames"],
+                    "download_directory": global_config["download_directory"],
+                }
+            )
+            for ex_pid, ex_filename in [
+                (e.replace("exception-", ""), sid_config[e])
+                for e in sid_config.keys()
+                if e.startswith("exception-")
+            ]:
+                if "exceptions" not in episode_item.keys():
+                    episode_item["exceptions"] = {}
+                episode_item["exceptions"][ex_pid] = ex_filename
 
-                download_queue.append(episode_item)
-                progress.start_task(task_metadata)
-                progress.update(task_episodes_metadata, advance=1)
-            progress.update(task_metadata, advance=1)
+            download_queue.append(episode_item)
 
-        # Preprocessing done. Let's start downloading.
-        total_download_progress = progress.add_task(
-            "Downloading episodes", total=len(download_queue)
+    # Preprocessing done. Let's start downloading.
+    LOG.info("Downloading episodes.")
+    download_workers = [
+        DownloadWorker(
+            item,
+            download_log,
+            dry_run,
         )
-        download_workers = [
-            DownloadWorker(
-                item, download_log, progress, total_download_progress, dry_run
-            )
-            for item in download_queue
-        ]
-        while True:
-            done_threads = list(
-                filter(
-                    lambda worker: worker.state == DownloadState.DONE, download_workers
-                )
-            )
+        for item in download_queue
+    ]
+    while True:
+        done_threads = list(
+            filter(lambda worker: worker.state == DownloadState.DONE, download_workers)
+        )
 
-            running_threads = list(
-                filter(
-                    lambda worker: worker.state == DownloadState.DOWNLOADING,
-                    download_workers,
-                )
+        running_threads = list(
+            filter(
+                lambda worker: worker.state == DownloadState.DOWNLOADING,
+                download_workers,
             )
-            waiting_threads = list(
-                filter(
-                    lambda worker: worker.state == DownloadState.WAITING,
-                    download_workers,
-                )
+        )
+        waiting_threads = list(
+            filter(
+                lambda worker: worker.state == DownloadState.WAITING,
+                download_workers,
             )
+        )
 
-            error_threads = list(
-                filter(
-                    lambda worker: worker.state == DownloadState.ERROR, download_workers
-                )
-            )
+        error_threads = list(
+            filter(lambda worker: worker.state == DownloadState.ERROR, download_workers)
+        )
 
-            if len(done_threads) == len(download_workers):
-                break
+        if len(done_threads) == len(download_workers):
+            break
 
-            if (
-                len(waiting_threads) + len(running_threads) == 0
-                and len(error_threads) > 0
+        if len(waiting_threads) + len(running_threads) == 0 and len(error_threads) > 0:
+            break
+
+        if len(done_threads) < len(download_workers):
+            for i in range(
+                0, min(len(waiting_threads), thread_count - len(running_threads))
             ):
-                break
+                waiting_threads[i].start()
 
-            if len(done_threads) < len(download_workers):
-                for i in range(
-                    0, min(len(waiting_threads), thread_count - len(running_threads))
-                ):
-                    waiting_threads[i].start()
-
-            time.sleep(0.5)
+        time.sleep(0.5)
     if not dry_run:
         json.dump(download_log, open(download_log_filename, "w"))
 
